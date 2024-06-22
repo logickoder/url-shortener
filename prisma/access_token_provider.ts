@@ -1,26 +1,15 @@
-import { symbols } from '@adonisjs/auth'
-import { SessionGuardUser, SessionUserProviderContract } from '@adonisjs/auth/types/session'
-import app from '@adonisjs/core/services/app'
+import {Secret} from '@adonisjs/core/helpers'
+import type {LucidRow} from '@adonisjs/lucid/types/model'
+import {RuntimeException} from '@adonisjs/core/exceptions'
 import {
-  AccessTokensGuardEvents,
   AccessTokensGuardUser,
-  AccessTokensProviderContract,
+  AccessTokensLucidUserProviderOptions,
   AccessTokensUserProviderContract,
-  LucidTokenable,
+  LucidTokenable
 } from '@adonisjs/auth/types/access_tokens'
-import { LucidModel } from '@adonisjs/lucid/types/model'
-import db from '@adonisjs/lucid/services/db'
-import { AccessToken } from '@adonisjs/auth/access_tokens'
-import { Secret } from '@adonisjs/core/helpers'
-import { GuardContract } from '@adonisjs/auth/types'
-import { GUARD_KNOWN_EVENTS, PROVIDER_REAL_USER } from '@adonisjs/auth/build/src/symbols.js'
-import { HttpContext } from '@adonisjs/core/http'
-import { EmitterLike } from '@adonisjs/core/types/events'
-import { E_UNAUTHORIZED_ACCESS } from '@adonisjs/auth/build/src/errors.js'
-
-interface Users extends LucidModel {
-  id: string | number
-}
+import {AccessToken} from '@adonisjs/auth/access_tokens'
+import {symbols} from '@adonisjs/auth';
+import app from '@adonisjs/core/services/app';
 
 const db = await app.container.make('prisma:db')
 
@@ -28,12 +17,11 @@ const db = await app.container.make('prisma:db')
  * Uses a lucid model to verify access tokens and find a user during
  * authentication
  */
-export class AccessTokensPrismaUserProvider<
+export class AccessTokensLucidUserProvider<
   TokenableProperty extends string,
-  UserModel extends LucidTokenable<TokenableProperty>,
-> implements AccessTokensUserProviderContract<InstanceType<UserModel>>
-{
-  declare [PROVIDER_REAL_USER]: InstanceType<UserModel>
+  UserModel extends LucidTokenable<TokenableProperty> & { id: string | number }
+> implements AccessTokensUserProviderContract<InstanceType<UserModel>> {
+  declare [symbols.PROVIDER_REAL_USER]: InstanceType<UserModel>
 
   /**
    * Reference to the lazily imported model
@@ -45,20 +33,7 @@ export class AccessTokensPrismaUserProvider<
      * Lucid provider options
      */
     protected options: AccessTokensLucidUserProviderOptions<TokenableProperty, UserModel>
-  ) {}
-
-  /**
-   * Imports the model from the provider, returns and caches it
-   * for further operations.
-   */
-  protected async getModel() {
-    if (this.model && !('hot' in import.meta)) {
-      return this.model
-    }
-
-    const importedModel = await this.options.model()
-    this.model = importedModel.default
-    return this.model
+  ) {
   }
 
   /**
@@ -82,16 +57,9 @@ export class AccessTokensPrismaUserProvider<
   async createUserForGuard(
     user: InstanceType<UserModel>
   ): Promise<AccessTokensGuardUser<InstanceType<UserModel>>> {
-    const model = await this.getModel()
-    if (!(user instanceof model)) {
-      throw new RuntimeException(
-        `Invalid user object. It must be an instance of the "${model.name}" model`
-      )
-    }
-
     return {
       getId() {
-        return String(user.id)
+        return user.id
       },
       getOriginal() {
         return user
@@ -120,8 +88,9 @@ export class AccessTokensPrismaUserProvider<
   async findById(
     identifier: string | number | BigInt
   ): Promise<AccessTokensGuardUser<InstanceType<UserModel>> | null> {
-    const model = await this.getModel()
-    const user = await model.find(identifier)
+    const user = await db.user.findUnique({
+      where: {id: identifier},
+    })
 
     if (!user) {
       return null
